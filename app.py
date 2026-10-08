@@ -19,6 +19,7 @@ from datetime import datetime
 import streamlit as st
 from dotenv import load_dotenv
 from google import genai
+from google.genai import types
 
 # ------------------------------------------------------------------
 # Config
@@ -66,14 +67,14 @@ def resolve_api_key() -> str | None:
 
 
 # ------------------------------------------------------------------
-# Gemini call helper
+# Gemini call helper (for single-shot prompts)
 # ------------------------------------------------------------------
 def call_gemini(prompt: str, system_instruction: str | None = None,
                 temperature: float = 0.7) -> str:
-    """Send a prompt to Gemini and return text. Handles errors gracefully."""
+    """Send a single prompt to Gemini and return text. Handles errors gracefully."""
     client = get_client(st.session_state["api_key"])
     try:
-        config = genai.types.GenerateContentConfig(
+        config = types.GenerateContentConfig(
             temperature=temperature,
             system_instruction=system_instruction,
         )
@@ -88,12 +89,12 @@ def call_gemini(prompt: str, system_instruction: str | None = None,
 
 
 # ------------------------------------------------------------------
-# Sidebar — API key + navigation
+# Sidebar — navigation
 # ------------------------------------------------------------------
 def render_sidebar() -> str:
     with st.sidebar:
         st.title("🤖 AI Productivity")
-        st.caption(f"Powered by **Gemini 3.5 Flash**")
+        st.caption("Powered by **Gemini 3.5 Flash**")
         st.caption(f"📅 {datetime.now():%d %b %Y}")
         st.divider()
 
@@ -338,7 +339,7 @@ Keep language simple and jargon-free."""
 
 
 # ------------------------------------------------------------------
-# Tool 5 — AI Chatbot
+# Tool 5 — AI Chatbot  (CORRECTED — uses types.Content & types.Part)
 # ------------------------------------------------------------------
 def page_chatbot():
     st.header("💬 AI Workplace Assistant")
@@ -375,13 +376,19 @@ def page_chatbot():
         with st.chat_message("user"):
             st.markdown(user_input)
 
-        # Build contents for Gemini (role: user / model)
+        # ------------------------------------------------------------------
+        # Build contents in the format the SDK expects:
+        # a list of types.Content(role=..., parts=[types.Part.from_text(...)])
+        # ------------------------------------------------------------------
         contents = []
         for m in st.session_state.chat_history:
-            contents.append({
-                "role": "user" if m["role"] == "user" else "model",
-                "parts": [m["content"]],
-            })
+            role = "user" if m["role"] == "user" else "model"
+            contents.append(
+                types.Content(
+                    role=role,
+                    parts=[types.Part.from_text(text=m["content"])],
+                )
+            )
 
         # Get response
         with st.chat_message("assistant"):
@@ -391,7 +398,7 @@ def page_chatbot():
                     response = client.models.generate_content(
                         model=MODEL_NAME,
                         contents=contents,
-                        config=genai.types.GenerateContentConfig(
+                        config=types.GenerateContentConfig(
                             temperature=0.7,
                             system_instruction=system_instruction,
                         ),
