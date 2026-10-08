@@ -1,191 +1,208 @@
-
 """
-AI Productivity Assistant — Powered by Gemini 3.5 Flash
-========================================================
-A command-line productivity suite that automates common workplace tasks:
+AI Productivity Assistant — Streamlit Edition
+=============================================
+A web-based productivity suite powered by Gemini 3.5 Flash.
 
+Tools:
   1. Smart Email Generator
   2. Meeting Notes Summarizer
   3. AI Task Planner / Scheduler
   4. AI Research Assistant
-  5. AI Chatbot Interface
+  5. AI Workplace Chatbot
 
-Built with the official google-genai SDK and Gemini 3.5 Flash.
+Deploy-ready for Streamlit Cloud.
 """
 
 import os
-import sys
-import textwrap
 from datetime import datetime
 
+import streamlit as st
 from dotenv import load_dotenv
 from google import genai
-from rich.console import Console
-from rich.panel import Panel
-from rich.prompt import Prompt, Confirm
-from rich.markdown import Markdown
-from rich.table import Table
-from rich.rule import Rule
 
 # ------------------------------------------------------------------
-# Setup
+# Config
 # ------------------------------------------------------------------
 load_dotenv()
 
-console = Console()
-
 MODEL_NAME = "gemini-3.5-flash"
-API_KEY_ENV_VAR = "GEMINI_API_KEY"
-
 DISCLAIMER = (
-    "⚠️  Responsible AI Notice: AI-generated content may contain errors or biases. "
+    "⚠️ **Responsible AI Notice:** AI-generated content may contain errors or biases. "
     "Always review, validate, and edit outputs before professional use."
+)
+
+st.set_page_config(
+    page_title="AI Productivity Assistant",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 
 # ------------------------------------------------------------------
-# Client helpers
+# API Key handling — works on BOTH Streamlit Cloud AND locally
 # ------------------------------------------------------------------
-def get_api_key() -> str:
-    """Retrieve the Gemini API key from environment variables."""
-    api_key = os.getenv(API_KEY_ENV_VAR)
-    if not api_key:
-        console.print(Panel.fit(
-            f"[bold red]API key not found.[/bold red]\n\n"
-            f"Set the [cyan]{API_KEY_ENV_VAR}[/cyan] environment variable or create a "
-            f"[cyan].env[/cyan] file with:\n\n"
-            f"[green]{API_KEY_ENV_VAR}=your_api_key_here[/green]",
-            title="Configuration Error",
-            border_style="red",
-        ))
-        sys.exit(1)
-    return api_key
+@st.cache_resource(show_spinner=False)
+def get_client(api_key: str) -> genai.Client:
+    """Create and cache the GenAI client."""
+    return genai.Client(api_key=api_key)
 
 
-def build_client() -> genai.Client:
-    """Create and return a Google GenAI client."""
-    return genai.Client(api_key=get_api_key())
-
-
-def generate(
-    client: genai.Client,
-    prompt: str,
-    system_instruction: str | None = None,
-    temperature: float = 0.7,
-) -> str:
+def resolve_api_key() -> str | None:
     """
-    Send a prompt to Gemini 3.5 Flash and return the text response.
-
-    Includes basic error handling so a single failed call does not crash
-    the whole application.
+    Priority order:
+      1. Streamlit secrets (st.secrets) — used on Streamlit Cloud
+      2. Environment variable — used locally via .env
     """
+    # 1. Streamlit Cloud secrets
+    try:
+        if "GEMINI_API_KEY" in st.secrets:
+            return st.secrets["GEMINI_API_KEY"]
+    except (FileNotFoundError, KeyError):
+        pass
+
+    # 2. Local .env
+    return os.getenv("GEMINI_API_KEY")
+
+
+# ------------------------------------------------------------------
+# Gemini call helper
+# ------------------------------------------------------------------
+def call_gemini(prompt: str, system_instruction: str | None = None,
+                temperature: float = 0.7) -> str:
+    """Send a prompt to Gemini and return text. Handles errors gracefully."""
+    client = get_client(st.session_state["api_key"])
     try:
         config = genai.types.GenerateContentConfig(
             temperature=temperature,
             system_instruction=system_instruction,
-        ) if system_instruction else genai.types.GenerateContentConfig(
-            temperature=temperature,
         )
-
         response = client.models.generate_content(
             model=MODEL_NAME,
             contents=prompt,
             config=config,
         )
         return response.text.strip()
-
     except Exception as exc:
-        return f"[ERROR] {exc}"
+        return f"❌ **Error:** {exc}"
 
 
-def show_output(title: str, text: str) -> None:
-    """Pretty-print AI output with a panel and disclaimer."""
-    console.print()
-    console.print(Panel(
-        Markdown(text),
-        title=f"[bold cyan]{title}[/bold cyan]",
-        border_style="cyan",
-        padding=(1, 2),
-    ))
-    console.print(f"[dim]{DISCLAIMER}[/dim]")
-    console.print()
+# ------------------------------------------------------------------
+# Sidebar — API key + navigation
+# ------------------------------------------------------------------
+def render_sidebar() -> str:
+    with st.sidebar:
+        st.title("🤖 AI Productivity")
+        st.caption(f"Powered by **Gemini 3.5 Flash**")
+        st.caption(f"📅 {datetime.now():%d %b %Y}")
+        st.divider()
+
+        tool = st.radio(
+            "Choose a tool",
+            [
+                "📧 Smart Email Generator",
+                "📝 Meeting Notes Summarizer",
+                "📅 AI Task Planner",
+                "🔎 AI Research Assistant",
+                "💬 AI Workplace Chatbot",
+            ],
+            label_visibility="collapsed",
+        )
+
+        st.divider()
+        st.caption("⚠️ Always validate AI output before professional use.")
+        return tool
 
 
-# ==================================================================
-# TOOL 1 — Smart Email Generator
-# ==================================================================
-def tool_email_generator(client: genai.Client) -> None:
-    console.print(Rule("[bold cyan]📧 Smart Email Generator[/bold cyan]"))
+# ------------------------------------------------------------------
+# Tool 1 — Smart Email Generator
+# ------------------------------------------------------------------
+def page_email():
+    st.header("📧 Smart Email Generator")
+    st.caption("Generate context-aware professional emails with tone and audience control.")
 
-    recipient = Prompt.ask("  Recipient type", choices=["client", "manager", "team", "colleague"], default="client")
-    tone = Prompt.ask("  Tone", choices=["formal", "informal", "persuasive", "friendly", "apologetic"], default="formal")
-    subject = Prompt.ask("  Subject / purpose of the email")
-    key_points = Prompt.ask("  Key points to include (separate with ';')")
+    with st.form("email_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            recipient = st.selectbox("Recipient", ["client", "manager", "team", "colleague"])
+        with col2:
+            tone = st.selectbox("Tone", ["formal", "informal", "persuasive", "friendly", "apologetic"])
 
-    prompt = f"""You are a professional business communication assistant.
+        subject = st.text_input("Subject / Purpose", placeholder="e.g. Follow-up on project proposal")
+        key_points = st.text_area(
+            "Key points to include",
+            placeholder="One point per line, or separated by semicolons",
+            height=120,
+        )
 
-Write a complete, ready-to-send email with the following specifications:
+        submitted = st.form_submit_button("✨ Generate Email", use_container_width=True)
 
+    if submitted:
+        if not subject.strip():
+            st.warning("Please enter a subject.")
+            return
+
+        prompt = f"""You are a professional business communication assistant.
+
+Write a complete, ready-to-send email:
 - Recipient type: {recipient}
 - Tone: {tone}
 - Subject/purpose: {subject}
-- Key points to include: {key_points}
+- Key points: {key_points or "None specified"}
 
 Requirements:
 1. Include a clear subject line.
-2. Use an appropriate greeting and sign-off for the recipient type.
-3. Keep the body concise (3–5 short paragraphs maximum).
-4. Ensure the tone matches the "{tone}" specification.
-5. End with a clear call to action or next step.
-6. Output only the email — no commentary or explanations."""
+2. Appropriate greeting and sign-off for the recipient.
+3. Concise body (3–5 short paragraphs).
+4. Tone must match "{tone}".
+5. End with a clear call to action.
+6. Output ONLY the email — no commentary."""
 
-    with console.status("[bold green]Drafting email…[/bold green]"):
-        result = generate(client, prompt, temperature=0.7)
+        with st.spinner("Drafting your email…"):
+            result = call_gemini(prompt, temperature=0.7)
 
-    show_output("Generated Email", result)
+        st.markdown("### 📨 Generated Email")
+        st.markdown(result)
+        st.info(DISCLAIMER)
+        st.download_button("⬇️ Download email", result, file_name="email.txt")
 
 
-# ==================================================================
-# TOOL 2 — Meeting Notes Summarizer
-# ==================================================================
-def tool_meeting_summarizer(client: genai.Client) -> None:
-    console.print(Rule("[bold cyan]📝 Meeting Notes Summarizer[/bold cyan]"))
-    console.print("[dim]Paste your raw meeting notes below. Type END on a new line when finished.[/dim]\n")
+# ------------------------------------------------------------------
+# Tool 2 — Meeting Notes Summarizer
+# ------------------------------------------------------------------
+def page_summarizer():
+    st.header("📝 Meeting Notes Summarizer")
+    st.caption("Turn messy meeting notes into structured summaries with action items.")
 
-    lines = []
-    while True:
-        try:
-            line = input()
-        except EOFError:
-            break
-        if line.strip().upper() == "END":
-            break
-        lines.append(line)
+    notes = st.text_area(
+        "Paste your raw meeting notes here",
+        height=250,
+        placeholder="Paste notes…",
+    )
 
-    raw_notes = "\n".join(lines).strip()
-    if not raw_notes:
-        console.print("[yellow]No notes provided. Returning to menu.[/yellow]")
-        return
+    if st.button("✨ Summarise Notes", use_container_width=True):
+        if not notes.strip():
+            st.warning("Please paste some notes first.")
+            return
 
-    prompt = f"""You are an expert meeting-notes analyst.
+        prompt = f"""You are an expert meeting-notes analyst.
 
-Analyse the following raw meeting notes and produce a structured summary.
+Analyse the following raw meeting notes:
 
-RAW NOTES:
 \"\"\"
-{raw_notes}
+{notes}
 \"\"\"
 
-Output the summary in this exact structure using Markdown:
+Output in this EXACT Markdown structure:
 
 ## 📌 Meeting Summary
-A 2–3 sentence overview of what the meeting was about.
+A 2–3 sentence overview.
 
 ## 🔑 Key Points
-- Bullet list of the most important discussion points (max 8).
+- Bullet list (max 8).
 
 ## ✅ Decisions Made
-- Bullet list of decisions agreed upon. If none, write "None recorded."
+- Bullet list. If none, write "None recorded."
 
 ## 🎯 Action Items
 | Action | Owner | Deadline |
@@ -193,38 +210,51 @@ A 2–3 sentence overview of what the meeting was about.
 | ...    | ...   | ...      |
 
 ## ⏰ Deadlines & Responsibilities
-- Highlight any critical deadlines and who is responsible.
+- Highlight critical deadlines and owners.
 
-Be concise. Do not invent information that is not in the notes."""
+Do NOT invent information that isn't in the notes."""
 
-    with console.status("[bold green]Summarising meeting notes…[/bold green]"):
-        result = generate(client, prompt, temperature=0.4)
+        with st.spinner("Summarising…"):
+            result = call_gemini(prompt, temperature=0.4)
 
-    show_output("Meeting Summary", result)
+        st.markdown("### 📋 Summary")
+        st.markdown(result)
+        st.info(DISCLAIMER)
+        st.download_button("⬇️ Download summary", result, file_name="meeting_summary.md")
 
 
-# ==================================================================
-# TOOL 3 — AI Task Planner / Scheduler
-# ==================================================================
-def tool_task_planner(client: genai.Client) -> None:
-    console.print(Rule("[bold cyan]📅 AI Task Planner / Scheduler[/bold cyan]"))
+# ------------------------------------------------------------------
+# Tool 3 — AI Task Planner
+# ------------------------------------------------------------------
+def page_planner():
+    st.header("📅 AI Task Planner / Scheduler")
+    st.caption("Build Eisenhower-prioritised day or week plans.")
 
-    horizon = Prompt.ask("  Plan for (day/week)", choices=["day", "week"], default="day")
-    tasks = Prompt.ask("  List your tasks (separate with ';')")
-    hours = Prompt.ask("  Available working hours per day", default="8")
-    priorities = Prompt.ask("  Any fixed priorities or constraints?", default="None")
+    col1, col2 = st.columns(2)
+    with col1:
+        horizon = st.selectbox("Plan for", ["day", "week"])
+        hours = st.number_input("Working hours per day", 1, 16, 8)
+    with col2:
+        priorities = st.text_input("Fixed priorities / constraints", value="None")
 
-    prompt = f"""You are a productivity coach and scheduling expert.
+    tasks = st.text_area(
+        "Your tasks (one per line, or separated with semicolons)",
+        height=150,
+    )
 
-Create a structured {horizon} plan based on the following:
+    if st.button("✨ Build Plan", use_container_width=True):
+        if not tasks.strip():
+            st.warning("Please list at least one task.")
+            return
 
+        prompt = f"""You are a productivity coach and scheduling expert.
+
+Create a structured {horizon} plan:
 - Tasks: {tasks}
 - Available hours per day: {hours}
-- Fixed priorities / constraints: {priorities}
+- Constraints: {priorities}
 
-Use the Eisenhower Matrix (Urgency × Importance) to prioritise.
-
-Output in this exact Markdown structure:
+Use the Eisenhower Matrix. Output in this EXACT Markdown structure:
 
 ## 🧭 Priority Matrix
 | Priority | Task | Why |
@@ -234,166 +264,179 @@ Output in this exact Markdown structure:
 | 🟢 Delegate / Batch | ... | ... |
 
 ## 🗓️ {horizon.title()} Schedule
-A time-blocked schedule with realistic time estimates for each task.
+Time-blocked schedule with realistic estimates.
 
 ## 💡 Time-Optimisation Tips
-- 3–5 practical suggestions to reduce context-switching and protect focus time.
+- 3–5 practical suggestions.
 
 ## ⚠️ Risks & Watch-outs
-- Any bottlenecks or overload risks the user should be aware of.
+- Bottlenecks or overload risks.
 
-Be realistic about how much can be done in the available hours."""
+Be realistic about what fits in the hours available."""
 
-    with console.status("[bold green]Building your plan…[/bold green]"):
-        result = generate(client, prompt, temperature=0.5)
+        with st.spinner("Building your plan…"):
+            result = call_gemini(prompt, temperature=0.5)
 
-    show_output(f"{horizon.title()} Plan", result)
+        st.markdown(f"### 🗓️ Your {horizon.title()} Plan")
+        st.markdown(result)
+        st.info(DISCLAIMER)
+        st.download_button("⬇️ Download plan", result, file_name="plan.md")
 
 
-# ==================================================================
-# TOOL 4 — AI Research Assistant
-# ==================================================================
-def tool_research_assistant(client: genai.Client) -> None:
-    console.print(Rule("[bold cyan]🔎 AI Research Assistant[/bold cyan]"))
+# ------------------------------------------------------------------
+# Tool 4 — AI Research Assistant
+# ------------------------------------------------------------------
+def page_research():
+    st.header("🔎 AI Research Assistant")
+    st.caption("Turn a topic or article into a structured research brief.")
 
-    topic = Prompt.ask("  Topic, article title, or text to research")
+    topic = st.text_area(
+        "Topic, article title, or text to research",
+        height=200,
+        placeholder="e.g. 'Impact of generative AI on customer service in banking'",
+    )
 
-    prompt = f"""You are a senior research analyst.
+    if st.button("✨ Research", use_container_width=True):
+        if not topic.strip():
+            st.warning("Please enter a topic or text.")
+            return
 
-Analyse the following topic or text:
+        prompt = f"""You are a senior research analyst.
+
+Analyse this topic/text:
 
 \"\"\"
 {topic}
 \"\"\"
 
-Produce a structured research brief in this exact Markdown format:
+Output in this EXACT Markdown structure:
 
 ## 📖 Overview
-A clear 2–3 sentence summary for a busy professional.
+2–3 sentence summary for a busy professional.
 
 ## 🔑 Key Insights
-- 4–6 bullet points capturing the most important findings.
+- 4–6 bullet points of important findings.
 
 ## 📊 Implications
-- What this means for a business or professional context.
+- Business / professional implications.
 
 ## ✅ Recommendations
-- 3–5 actionable recommendations based on the analysis.
+- 3–5 actionable recommendations.
 
 ## ⚠️ Limitations & Caveats
-- Note any uncertainties, missing information, or potential biases.
+- Uncertainties, missing info, or potential bias.
 
-Keep the language simple and jargon-free. If the topic is too broad, focus on the most practical angle."""
+Keep language simple and jargon-free."""
 
-    with console.status("[bold green]Researching…[/bold green]"):
-        result = generate(client, prompt, temperature=0.5)
+        with st.spinner("Researching…"):
+            result = call_gemini(prompt, temperature=0.5)
 
-    show_output("Research Brief", result)
+        st.markdown("### 📄 Research Brief")
+        st.markdown(result)
+        st.info(DISCLAIMER)
+        st.download_button("⬇️ Download brief", result, file_name="research_brief.md")
 
 
-# ==================================================================
-# TOOL 5 — AI Chatbot Interface
-# ==================================================================
-def tool_chatbot(client: genai.Client) -> None:
-    console.print(Rule("[bold cyan]💬 AI Workplace Assistant[/bold cyan]"))
-    console.print("[dim]Type /exit to return to the main menu. Type /clear to reset the conversation.[/dim]\n")
+# ------------------------------------------------------------------
+# Tool 5 — AI Chatbot
+# ------------------------------------------------------------------
+def page_chatbot():
+    st.header("💬 AI Workplace Assistant")
+    st.caption("Have an interactive conversation with Gemini.")
 
     system_instruction = (
         "You are a helpful, professional workplace AI assistant. "
-        "You help with drafting, planning, researching, and general productivity tasks. "
-        "Be concise, structured, and practical. Always remind the user to validate "
+        "You help with drafting, planning, researching, and productivity tasks. "
+        "Be concise, structured, and practical. Remind the user to validate "
         "important information before acting on it."
     )
 
-    history = []
+    # Initialise chat history
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
 
-    while True:
-        try:
-            user_input = Prompt.ask("[bold green]You[/bold green]")
-        except (EOFError, KeyboardInterrupt):
-            console.print("\n[dim]Returning to menu…[/dim]")
-            break
+    # Clear button
+    col1, col2 = st.columns([4, 1])
+    with col2:
+        if st.button("🗑️ Clear chat", use_container_width=True):
+            st.session_state.chat_history = []
+            st.rerun()
 
-        if user_input.strip().lower() == "/exit":
-            break
-        if user_input.strip().lower() == "/clear":
-            history.clear()
-            console.print("[yellow]Conversation cleared.[/yellow]\n")
-            continue
-        if not user_input.strip():
-            continue
+    # Render past messages
+    for msg in st.session_state.chat_history:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
-        history.append({"role": "user", "parts": [user_input]})
+    # Chat input
+    user_input = st.chat_input("Ask me anything…")
+    if user_input:
+        # Show user message
+        st.session_state.chat_history.append({"role": "user", "content": user_input})
+        with st.chat_message("user"):
+            st.markdown(user_input)
 
-        with console.status("[bold green]Thinking…[/bold green]"):
-            try:
-                response = client.models.generate_content(
-                    model=MODEL_NAME,
-                    contents=history,
-                    config=genai.types.GenerateContentConfig(
-                        temperature=0.7,
-                        system_instruction=system_instruction,
-                    ),
-                )
-                reply = response.text.strip()
-            except Exception as exc:
-                reply = f"[ERROR] {exc}"
-                history.pop()
-                console.print(f"[red]{reply}[/red]\n")
-                continue
+        # Build contents for Gemini (role: user / model)
+        contents = []
+        for m in st.session_state.chat_history:
+            contents.append({
+                "role": "user" if m["role"] == "user" else "model",
+                "parts": [m["content"]],
+            })
 
-        history.append({"role": "model", "parts": [reply]})
-        console.print(Panel(Markdown(reply), border_style="cyan", title="Assistant"))
-        console.print(f"[dim]{DISCLAIMER}[/dim]\n")
+        # Get response
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking…"):
+                try:
+                    client = get_client(st.session_state["api_key"])
+                    response = client.models.generate_content(
+                        model=MODEL_NAME,
+                        contents=contents,
+                        config=genai.types.GenerateContentConfig(
+                            temperature=0.7,
+                            system_instruction=system_instruction,
+                        ),
+                    )
+                    reply = response.text.strip()
+                except Exception as exc:
+                    reply = f"❌ **Error:** {exc}"
 
-
-# ==================================================================
-# Main Menu
-# ==================================================================
-def show_menu() -> str:
-    table = Table(title="AI Productivity Assistant", show_header=False, border_style="cyan")
-    table.add_column("Option", style="bold cyan", width=6)
-    table.add_column("Tool")
-
-    table.add_row("1", "📧  Smart Email Generator")
-    table.add_row("2", "📝  Meeting Notes Summarizer")
-    table.add_row("3", "📅  AI Task Planner / Scheduler")
-    table.add_row("4", "🔎  AI Research Assistant")
-    table.add_row("5", "💬  AI Workplace Chatbot")
-    table.add_row("0", "🚪  Exit")
-
-    console.print()
-    console.print(table)
-    return Prompt.ask("Select a tool", choices=["1", "2", "3", "4", "5", "0"], default="5")
+            st.markdown(reply)
+            st.session_state.chat_history.append(
+                {"role": "assistant", "content": reply}
+            )
 
 
-def main() -> None:
-    console.print(Panel.fit(
-        "[bold cyan]AI Productivity Assistant[/bold cyan]\n"
-        f"[dim]Powered by Gemini 3.5 Flash  ·  {datetime.now():%d %b %Y}[/dim]\n\n"
-        "[italic]Automate emails, meetings, planning, research, and more.[/italic]",
-        border_style="cyan",
-    ))
+# ------------------------------------------------------------------
+# Main
+# ------------------------------------------------------------------
+def main():
+    # Resolve API key once per session
+    if "api_key" not in st.session_state:
+        key = resolve_api_key()
+        if not key:
+            st.error(
+                "### ❌ GEMINI_API_KEY not configured\n\n"
+                "**On Streamlit Cloud:** go to your app → **Settings → Secrets** "
+                "and add:\n\n"
+                "```toml\nGEMINI_API_KEY = \"AIzaSy...\"\n```\n\n"
+                "**Locally:** create a `.env` file with "
+                "`GEMINI_API_KEY=AIzaSy...`"
+            )
+            st.stop()
+        st.session_state["api_key"] = key
 
-    client = build_client()
+    tool = render_sidebar()
 
-    actions = {
-        "1": tool_email_generator,
-        "2": tool_meeting_summarizer,
-        "3": tool_task_planner,
-        "4": tool_research_assistant,
-        "5": tool_chatbot,
-    }
-
-    while True:
-        choice = show_menu()
-        if choice == "0":
-            console.print("\n[bold cyan]Goodbye! 👋[/bold cyan]\n")
-            break
-        action = actions.get(choice)
-        if action:
-            action(client)
-            console.print(Rule(style="dim"))
+    if tool.startswith("📧"):
+        page_email()
+    elif tool.startswith("📝"):
+        page_summarizer()
+    elif tool.startswith("📅"):
+        page_planner()
+    elif tool.startswith("🔎"):
+        page_research()
+    elif tool.startswith("💬"):
+        page_chatbot()
 
 
 if __name__ == "__main__":
